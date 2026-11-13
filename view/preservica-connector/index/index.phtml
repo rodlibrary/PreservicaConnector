@@ -1,0 +1,120 @@
+<?php
+/**
+ * @var \Laminas\View\Renderer\PhpRenderer $this
+ * @var bool $configured
+ * @var string $host
+ * @var string $query
+ * @var int $perPage
+ * @var int[] $perPageOptions
+ * @var bool $searched
+ * @var array $results
+ * @var int $total
+ * @var array $imported Preservica reference => Omeka item id
+ * @var \PreservicaConnector\Form\ImportForm|null $importForm
+ */
+$translate = $this->plugin('translate');
+$escape = $this->plugin('escapeHtml');
+$this->headLink()->appendStylesheet($this->assetUrl('css/preservica-connector.css', 'PreservicaConnector'));
+$this->headScript()->appendFile($this->assetUrl('js/preservica-connector.js', 'PreservicaConnector'));
+$this->htmlElement('body')->appendAttribute('class', 'preservica-connector browse');
+?>
+
+<?php echo $this->pageTitle($translate('Search and import'), 1, $translate('Preservica Connector')); ?>
+
+<?php if (!$configured): ?>
+<div class="no-resources">
+    <p><?php echo $translate('The connection to Preservica has not been set up yet.'); ?></p>
+    <p><?php echo $this->hyperlink(
+        $translate('Configure the module'),
+        $this->url('admin/default', ['controller' => 'module', 'action' => 'configure'], ['query' => ['id' => 'PreservicaConnector']]),
+        ['class' => 'button']
+    ); ?></p>
+</div>
+<?php return; endif; ?>
+
+<form method="get" action="<?php echo $escape($this->url('admin/preservica-connector')); ?>" id="preservica-search-form">
+    <label for="preservica-q"><?php echo sprintf($translate('Search assets in %s'), $escape(preg_replace('#^https?://#', '', $host))); ?></label>
+    <div class="preservica-search-row">
+        <input type="search" name="q" id="preservica-q" value="<?php echo $escape($query); ?>" placeholder="<?php echo $escape($translate('Title, description or other indexed text')); ?>" required>
+        <select name="per_page" aria-label="<?php echo $escape($translate('Results per page')); ?>">
+            <?php foreach ($perPageOptions as $option): ?>
+            <option value="<?php echo $option; ?>"<?php echo $option == $perPage ? ' selected' : ''; ?>><?php echo sprintf($translate('%s per page'), $option); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <button type="submit"><?php echo $translate('Search'); ?></button>
+    </div>
+    <p class="preservica-hint"><?php echo $translate('Enter % to list every asset the service account can read.'); ?></p>
+</form>
+
+<?php if ($searched && !$results): ?>
+<div class="no-resources">
+    <p><?php echo sprintf($translate('No assets found for "%s".'), $escape($query)); ?></p>
+</div>
+<?php elseif ($searched): ?>
+
+<div class="browse-controls">
+    <?php echo $this->pagination(); ?>
+</div>
+
+<table class="tablesaw preservica-results" data-tablesaw-mode="stack">
+    <thead>
+        <tr>
+            <th>
+                <input type="checkbox" id="preservica-select-all" aria-label="<?php echo $escape($translate('Select all assets on this page')); ?>">
+                <?php echo $translate('Asset'); ?>
+            </th>
+            <th class="preservica-status-column"><?php echo $translate('In Omeka'); ?></th>
+        </tr>
+    </thead>
+    <tbody>
+    <?php foreach ($results as $i => $result): ?>
+        <?php $itemId = isset($imported[$result['ref']]) ? $imported[$result['ref']] : null; ?>
+        <tr>
+            <td>
+                <div class="preservica-asset">
+                    <input type="checkbox" name="refs[]" form="preservica-import-form" id="preservica-ref-<?php echo $i; ?>" value="<?php echo $escape($result['ref']); ?>"<?php echo $itemId ? ' disabled' : ''; ?>>
+                    <img src="<?php echo $escape($this->url('admin/preservica-connector/thumbnail', ['ref' => $result['ref']])); ?>" alt="" loading="lazy" width="64" height="64">
+                    <div>
+                        <label for="preservica-ref-<?php echo $i; ?>" class="preservica-title"><?php echo $escape($result['title'] !== '' ? $result['title'] : $translate('[Untitled]')); ?></label>
+                        <?php if ($result['description'] !== ''): ?>
+                        <span class="preservica-description"><?php echo $escape(mb_strimwidth($result['description'], 0, 300, '…')); ?></span>
+                        <?php endif; ?>
+                        <span class="preservica-ref"><?php echo $escape($result['ref']); ?></span>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <?php if ($itemId): ?>
+                <?php echo $this->hyperlink(sprintf($translate('Item #%s'), $itemId), $this->url('admin/id', ['controller' => 'item', 'id' => $itemId])); ?>
+                <?php else: ?>
+                <span class="preservica-muted"><?php echo $translate('Not imported'); ?></span>
+                <?php endif; ?>
+            </td>
+        </tr>
+    <?php endforeach; ?>
+    </tbody>
+</table>
+
+<div class="browse-controls">
+    <?php echo $this->pagination(); ?>
+</div>
+
+<?php // The form sits below the table (pagination has a form of its own, and forms cannot nest); the checkboxes above join it through their "form" attribute. ?>
+<?php echo $this->form()->openTag($importForm); ?>
+<?php foreach ($importForm as $element): ?>
+<?php if ($element instanceof \Laminas\Form\Element\Csrf): ?>
+<?php echo $this->formElement($element); ?>
+<?php endif; ?>
+<?php endforeach; ?>
+<?php echo $this->formElement($importForm->get('query')); ?>
+<fieldset class="preservica-import-options">
+    <legend><?php echo $translate('Import selected assets'); ?></legend>
+    <p><?php echo $translate('Each selected asset becomes one Omeka item. Its Dublin Core metadata is mapped to item properties and its access files are copied into Omeka as media. The selection covers this page of results only.'); ?></p>
+    <?php echo $this->formRow($importForm->get('item_set')); ?>
+    <?php echo $this->formRow($importForm->get('comment')); ?>
+    <button type="submit" id="preservica-import-button"><?php echo $translate('Import selected'); ?></button>
+    <span id="preservica-selected-count" aria-live="polite" data-template="<?php echo $escape($translate('%s selected')); ?>"></span>
+</fieldset>
+
+<?php echo $this->form()->closeTag(); ?>
+<?php endif; ?>

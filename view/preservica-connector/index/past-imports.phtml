@@ -1,0 +1,102 @@
+<?php
+/**
+ * @var \Laminas\View\Renderer\PhpRenderer $this
+ * @var array $imports
+ * @var \Laminas\Form\Form $form
+ */
+$translate = $this->plugin('translate');
+$escape = $this->plugin('escapeHtml');
+$this->headLink()->appendStylesheet($this->assetUrl('css/preservica-connector.css', 'PreservicaConnector'));
+$this->htmlElement('body')->appendAttribute('class', 'preservica-connector browse');
+?>
+
+<?php echo $this->pageTitle($translate('Past imports'), 1, $translate('Preservica Connector')); ?>
+
+<?php if (!$imports): ?>
+<div class="no-resources">
+    <p><?php echo $translate('Nothing has been imported from Preservica yet.'); ?></p>
+    <p><?php echo $this->hyperlink($translate('Search and import'), $this->url('admin/preservica-connector'), ['class' => 'button']); ?></p>
+</div>
+<?php else: ?>
+
+<?php // Checkboxes in the table join this form through their "form" attribute. ?>
+<div id="page-actions">
+    <?php echo $this->form()->openTag($form); ?>
+    <?php foreach ($form as $element): ?>
+    <?php if ($element instanceof \Laminas\Form\Element\Csrf): ?>
+    <?php echo $this->formElement($element); ?>
+    <?php endif; ?>
+    <?php endforeach; ?>
+    <button type="submit"><?php echo $translate('Undo selected imports'); ?></button>
+    <?php echo $this->form()->closeTag(); ?>
+</div>
+
+<div class="browse-controls">
+    <?php echo $this->pagination(); ?>
+</div>
+
+<table class="tablesaw preservica-imports" data-tablesaw-mode="stack">
+    <thead>
+        <tr>
+            <th><?php echo $translate('Import'); ?></th>
+            <th><?php echo $translate('Results'); ?></th>
+            <th><?php echo $translate('Date'); ?></th>
+            <th><?php echo $translate('Status'); ?></th>
+            <th><?php echo $translate('Owner'); ?></th>
+        </tr>
+    </thead>
+    <tbody>
+    <?php foreach ($imports as $import): ?>
+        <?php
+        $job = $import['job'];
+        $undoJob = $import['undo_job'];
+        $owner = $job->owner();
+        $results = [
+            sprintf($translate('%s added'), (int) $import['added_count']),
+            sprintf($translate('%s files'), (int) $import['file_count']),
+        ];
+        if ($import['skipped_count']) {
+            $results[] = sprintf($translate('%s already imported'), (int) $import['skipped_count']);
+        }
+        if ($import['failed_count']) {
+            $results[] = sprintf($translate('%s failed'), (int) $import['failed_count']);
+        }
+        ?>
+        <tr>
+            <td>
+                <div class="preservica-import">
+                    <input type="checkbox" name="undo[]" form="preservica-undo-form" value="<?php echo $job->id(); ?>"<?php echo $undoJob ? ' disabled' : ''; ?> aria-label="<?php echo $escape(sprintf($translate('Undo import job #%s'), $job->id())); ?>">
+                    <div>
+                        <?php echo $job->link(sprintf($translate('Job #%s'), $job->id())); ?>
+                        <?php if ((string) $import['query'] !== ''): ?>
+                        <span class="preservica-muted"><?php echo sprintf($translate('Search: %s'), $escape($import['query'])); ?></span>
+                        <?php endif; ?>
+                        <?php if ((string) $import['comment'] !== ''): ?>
+                        <span class="preservica-description"><?php echo $escape($import['comment']); ?></span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <?php echo $escape(implode(', ', $results)); ?>
+                <?php if ($import['item_count']): ?>
+                <br><?php echo $this->hyperlink(
+                    $translate('View items'),
+                    $this->url('admin/default', ['controller' => 'item', 'action' => 'browse'], ['query' => ['preservica_import_job' => $job->id()]])
+                ); ?>
+                <?php endif; ?>
+            </td>
+            <td><?php echo $escape($this->i18n()->dateFormat($job->started(), 'medium', 'short')); ?></td>
+            <td>
+                <?php if ($undoJob): ?>
+                <?php echo sprintf($translate('Undone in %s'), $undoJob->link(sprintf($translate('job #%s'), $undoJob->id()))); ?>
+                <?php else: ?>
+                <?php echo $escape($translate($job->statusLabel())); ?>
+                <?php endif; ?>
+            </td>
+            <td><?php echo $owner ? $escape($owner->name()) : ''; ?></td>
+        </tr>
+    <?php endforeach; ?>
+    </tbody>
+</table>
+<?php endif; ?>
