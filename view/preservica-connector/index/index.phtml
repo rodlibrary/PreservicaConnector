@@ -109,7 +109,7 @@ $this->htmlElement('body')->appendAttribute('class', 'preservica-connector brows
 <?php echo $this->formElement($importForm->get('query')); ?>
 <fieldset class="preservica-import-options">
     <legend><?php echo $translate('Import selected assets'); ?></legend>
-    <p><?php echo $translate('Each selected asset becomes one Omeka item. Its Dublin Core metadata is mapped to item properties and its access files are copied into Omeka as media. The selection covers this page of results only.'); ?></p>
+    <p><?php echo $translate('Each selected asset becomes one Omeka item. Its Dublin Core and MODS metadata is mapped to item properties and its access files are copied into Omeka as media. The selection covers this page of results only.'); ?></p>
     <?php echo $this->formRow($importForm->get('item_set')); ?>
     <?php echo $this->formRow($importForm->get('comment')); ?>
     <button type="submit" id="preservica-import-button"><?php echo $translate('Import selected'); ?></button>

@@ -7,6 +7,7 @@ use DOMElement;
 use DOMXPath;
 use Laminas\Http\Client as HttpClient;
 use Laminas\Http\Response;
+use PreservicaConnector\Metadata\ModsMapper;
 
 /**
  * Minimal read-only client for the Preservica Access Token, Content and
@@ -229,7 +230,10 @@ class Client
     /**
      * Fetch an asset's core properties and descriptive metadata.
      *
-     * @return array ['ref', 'title', 'description', 'securityTag', 'dc' => [element => [values]]]
+     * Dublin Core and MODS metadata are both returned under 'dc', keyed by
+     * Dublin Core Terms local name.
+     *
+     * @return array ['ref', 'title', 'description', 'securityTag', 'dc' => [term => [values]]]
      */
     public function getAsset($ref)
     {
@@ -260,13 +264,40 @@ class Client
                 if ($value === '') {
                     continue;
                 }
-                $name = $element->localName;
-                if (!isset($asset['dc'][$name]) || !in_array($value, $asset['dc'][$name], true)) {
-                    $asset['dc'][$name][] = $value;
+                $this->addValue($asset['dc'], $element->localName, $value);
+            }
+            // MODS records are mapped to Dublin Core Terms.
+            foreach ($fragmentXpath->query('//*[local-name()="Content"]//*[local-name()="mods"]') as $mods) {
+                if ($mods->namespaceURI !== ModsMapper::MODS_NS) {
+                    continue;
+                }
+                foreach ((new ModsMapper)->map($mods) as $name => $values) {
+                    foreach ($values as $value) {
+                        $this->addValue($asset['dc'], $name, $value);
+                    }
                 }
             }
         }
         return $asset;
+    }
+
+    /**
+     * Add a value unless one with the same text is already there. A value
+     * is a string, or ['uri' => ..., 'label' => ...] for a linked value,
+     * which replaces a plain value with the same text.
+     */
+    protected function addValue(array &$dc, $name, $value)
+    {
+        $label = is_array($value) ? $value['label'] : $value;
+        foreach (isset($dc[$name]) ? $dc[$name] : [] as $i => $existing) {
+            if ((is_array($existing) ? $existing['label'] : $existing) === $label) {
+                if (is_array($value) && !is_array($existing)) {
+                    $dc[$name][$i] = $value;
+                }
+                return;
+            }
+        }
+        $dc[$name][] = $value;
     }
 
     /**

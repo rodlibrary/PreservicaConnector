@@ -20,12 +20,14 @@ $assets = [
         'title' => 'Campus aerial photograph, 1954',
         'description' => 'Aerial view of the main quad looking north.',
         'dc' => ['title' => ['Campus aerial photograph, 1954'], 'creator' => ['University Photo Service'], 'date' => ['1954-06-01'], 'subject' => ['Aerial photographs', 'Campus planning'], 'rights' => ['http://rightsstatements.org/vocab/InC/1.0/']],
+        'mods' => '<mods:mods xmlns:mods="http://www.loc.gov/mods/v3"><mods:titleInfo><mods:title>Campus aerial photograph, 1954</mods:title></mods:titleInfo><mods:subject><mods:topic valueURI="http://id.loc.gov/authorities/subjects/sh85001255">Aerial photographs</mods:topic></mods:subject><mods:subject><mods:geographic>Cedar Falls (Iowa)</mods:geographic></mods:subject><mods:physicalDescription><mods:extent>1 photograph</mods:extent></mods:physicalDescription></mods:mods>',
         'reps' => ['Preservation' => ['c1111111-1111-4111-8111-11111111aaaa'], 'Access' => ['c1111111-1111-4111-8111-11111111bbbb', 'c1111111-1111-4111-8111-11111111cccc']],
     ],
     'a2222222-2222-4222-8222-222222222222' => [
         'title' => 'Commencement program',
         'description' => 'Printed program. Preservation copy only.',
         'dc' => [],
+        'mods' => '<mods xmlns="http://www.loc.gov/mods/v3"><titleInfo><title>Commencement program</title></titleInfo><name><namePart>State Teachers College</namePart></name><originInfo><dateCreated>1931-06-02</dateCreated></originInfo><typeOfResource>text</typeOfResource></mods>',
         'reps' => ['Preservation' => ['c2222222-2222-4222-8222-22222222aaaa']],
     ],
     'a3333333-3333-4333-8333-333333333333' => [
@@ -108,10 +110,14 @@ if ($path === '/api/content/thumbnail') {
 $uuid = '([0-9a-f-]{36})';
 if (preg_match("#^/api/entity/information-objects/$uuid$#", $path, $m) && isset($assets[$m[1]])) {
     $a = $assets[$m[1]];
-    $fragments = $a['dc'] ? '<Fragment schema="http://www.openarchives.org/OAI/2.0/oai_dc/">' . BASE . "/api/entity/information-objects/{$m[1]}/metadata/f0000000-0000-4000-8000-000000000001</Fragment>" : '';
+    $modsFragment = isset($a['mods']) ? '<Fragment schema="http://www.loc.gov/mods/v3">' . BASE . "/api/entity/information-objects/{$m[1]}/metadata/f0000000-0000-4000-8000-000000000002</Fragment>" : '';
+    $fragments = $modsFragment . ($a['dc'] ? '<Fragment schema="http://www.openarchives.org/OAI/2.0/oai_dc/">' . BASE . "/api/entity/information-objects/{$m[1]}/metadata/f0000000-0000-4000-8000-000000000001</Fragment>" : '');
     return $xml('<EntityResponse xmlns="' . NS_ENTITY . '" xmlns:xip="' . NS_XIP . '"><xip:InformationObject><xip:Ref>' . $m[1] . '</xip:Ref><xip:Title>' . htmlspecialchars($a['title']) . '</xip:Title><xip:Description>' . htmlspecialchars($a['description']) . '</xip:Description><xip:SecurityTag>open</xip:SecurityTag><xip:Parent>d0000000-0000-4000-8000-000000000000</xip:Parent></xip:InformationObject><AdditionalInformation><Self>' . BASE . $path . '</Self><Metadata>' . $fragments . '</Metadata></AdditionalInformation></EntityResponse>');
 }
 if (preg_match("#^/api/entity/information-objects/$uuid/metadata/$uuid$#", $path, $m) && isset($assets[$m[1]])) {
+    if (substr($m[2], -1) === '2') {
+        return $xml('<MetadataResponse xmlns="' . NS_ENTITY . '" xmlns:xip="' . NS_XIP . '"><xip:MetadataContainer schemaUri="http://www.loc.gov/mods/v3"><xip:Ref>' . $m[2] . '</xip:Ref><xip:Entity>' . $m[1] . '</xip:Entity><xip:Content>' . $assets[$m[1]]['mods'] . '</xip:Content></xip:MetadataContainer></MetadataResponse>');
+    }
     $dc = '';
     foreach ($assets[$m[1]]['dc'] as $name => $values) {
         foreach ($values as $value) {

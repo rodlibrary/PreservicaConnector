@@ -150,7 +150,12 @@ check('2 items created, 1 failed', sorted(by_title) == ['Campus aerial photograp
 
 aerial = by_title['Campus aerial photograph, 1954']
 check('DC creator mapped', aerial['dcterms:creator'][0]['@value'] == 'University Photo Service')
-check('DC subjects mapped (2)', [v['@value'] for v in aerial['dcterms:subject']] == ['Aerial photographs', 'Campus planning'])
+subjects = aerial['dcterms:subject']
+check('DC and MODS subjects merged without duplicates', [v.get('@value') or v.get('o:label') for v in subjects] == ['Aerial photographs', 'Campus planning'], subjects)
+check('MODS authority link kept as URI with label', subjects[0]['type'] == 'uri' and subjects[0]['@id'] == 'http://id.loc.gov/authorities/subjects/sh85001255')
+check('same title in DC and MODS stored once', len(aerial['dcterms:title']) == 1)
+check('MODS place mapped to spatial coverage', aerial['dcterms:spatial'][0]['@value'] == 'Cedar Falls (Iowa)')
+check('MODS extent mapped', aerial['dcterms:extent'][0]['@value'] == '1 photograph')
 check('URL value stored as URI', aerial['dcterms:rights'][0]['type'] == 'uri' and aerial['dcterms:rights'][0]['@id'].startswith('http://rightsstatements.org'))
 check('Preservica ref stored as identifier', aerial['dcterms:identifier'][0]['@value'] == 'a1111111-1111-4111-8111-111111111111')
 media = [s.get(m['@id']).json() for m in aerial['o:media']]
@@ -160,7 +165,8 @@ r = s.get(media[0]['o:original_url'])
 check('original file served from Omeka', r.status_code == 200 and r.content[:3] == b'\xff\xd8\xff' and len(r.content) == media[0]['o:size'], (r.status_code, len(r.content)))
 
 program = by_title['Commencement program']
-check('title falls back to Preservica title', program['dcterms:title'][0]['@value'] == 'Commencement program')
+check('MODS-only record: title mapped once', [v['@value'] for v in program['dcterms:title']] == ['Commencement program'])
+check('MODS-only record: creator, date and type mapped', program['dcterms:creator'][0]['@value'] == 'State Teachers College' and program['dcterms:date'][0]['@value'] == '1931-06-02' and program['dcterms:type'][0]['@value'] == 'text')
 check('description falls back to Preservica description', program['dcterms:description'][0]['@value'].startswith('Printed program'))
 media = [s.get(m['@id']).json() for m in program['o:media']]
 check('preservation copy used when no access copy', [m['o:source'] for m in media] == ['program.png'] and media[0]['o:media_type'] == 'image/png')

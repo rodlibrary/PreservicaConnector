@@ -8,7 +8,8 @@ sites and exhibits.
 For each selected asset the module:
 
 - creates one Omeka item,
-- maps the asset's Dublin Core metadata to Dublin Core Terms properties,
+- maps the asset's Dublin Core and MODS metadata to Dublin Core Terms
+  properties,
 - copies the asset's access files into Omeka as ordinary media, so pages keep
   working without a live connection to Preservica,
 - remembers which asset the item came from, so the same asset is not imported
@@ -77,13 +78,43 @@ You can also attach a Preservica file to an existing item: on the item's
 
 ### What is imported
 
-**Metadata.** Every `dc:` (Dublin Core Elements 1.1) and `dcterms:` element
-found in any of the asset's metadata fragments is added to the Dublin Core
-Terms property of the same name, for example `dc:creator` becomes
-`dcterms:creator`. Values that are web addresses are stored as URIs. If the
-metadata has no title or description, the asset's own title and description
-in Preservica are used. Other schemas (MODS, EAD, custom schemas) are not
-mapped.
+**Metadata.** Dublin Core and MODS are read from all of the asset's metadata
+fragments and merged; a value that appears in both is stored once. If neither
+gives a title or description, the asset's own title and description in
+Preservica are used. Other schemas (EAD, custom schemas) are not mapped.
+
+*Dublin Core.* Every `dc:` (Dublin Core Elements 1.1) and `dcterms:` element
+is added to the Dublin Core Terms property of the same name, for example
+`dc:creator` becomes `dcterms:creator`. Values that are web addresses are
+stored as URIs.
+
+*MODS.* MODS version 3 records are mapped to Dublin Core Terms following the
+Library of Congress MODS-to-Dublin-Core crosswalk:
+
+| MODS | Dublin Core Terms |
+| --- | --- |
+| `titleInfo` (with non-sort, subtitle, part number and name) | Title; Alternative Title if the `titleInfo` has a `type` |
+| `name` | Creator if it has no role, a creator or author role, or `usage="primary"`; otherwise Contributor |
+| `typeOfResource`, `genre` | Type |
+| `originInfo/publisher` | Publisher |
+| `originInfo` dates (`dateCreated`, `dateIssued`, `dateCaptured`, `dateOther`) | Date; a start and end pair becomes `start/end` |
+| `originInfo/copyrightDate` | Date Copyrighted |
+| `language/languageTerm` | Language |
+| `physicalDescription/extent` | Extent |
+| `physicalDescription/form`, `internetMediaType` | Format |
+| `abstract`, `note` | Description |
+| `tableOfContents` | Table Of Contents |
+| `targetAudience` | Audience |
+| `subject` | Subject; compound headings are joined with `--`. A subject that is only a place becomes Spatial Coverage, only a time period Temporal Coverage |
+| `classification` | Subject |
+| `relatedItem` | Is Part Of for `type="host"` or `"series"`, Source for `type="original"`, otherwise Relation |
+| `identifier`, `location/url` | Identifier |
+| `accessCondition` | Rights |
+
+Where MODS links a name, subject, genre or language to an authority with
+`valueURI`, or a rights statement with `xlink:href`, the value is stored as a
+URI with the text as its label. Place of publication, physical location and
+`recordInfo` are not imported.
 
 **Files.** The module uses the asset's Access representation, or its
 Preservation representation if there is none and the fallback is enabled. Each
@@ -112,7 +143,8 @@ over; undo the import and import again to refresh.
 ## Development
 
 `test/` contains a stub of the Preservica API (`mock-preservica.php`) and two
-scripts that drive a real Omeka S install against it: `e2e.py` (install,
+scripts that drive a real Omeka S install against it, plus a unit test of
+the MODS crosswalk (`php test/mods-mapper-test.php`): `e2e.py` (install,
 configure, search, import, re-import, undo) and `browser.py` (the same flow in
 headless Chrome). The directory is left out of release zips.
 

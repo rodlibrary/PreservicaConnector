@@ -100,10 +100,11 @@ class Import extends AbstractJob
     }
 
     /**
-     * Map an asset's Dublin Core metadata to Omeka property values.
+     * Map an asset's descriptive metadata to Omeka property values.
      *
-     * Both simple (dc:) and qualified (dcterms:) elements map to the Dublin
-     * Core Terms property of the same name. The Preservica title and
+     * Simple (dc:) and qualified (dcterms:) Dublin Core elements, and MODS
+     * records crosswalked by the client, map to the Dublin Core Terms
+     * property of the same name. The Preservica title and
      * description are used when the metadata has none.
      */
     protected function buildValues(array $asset, $storeReference)
@@ -125,7 +126,15 @@ class Import extends AbstractJob
                 continue;
             }
             foreach ($values as $value) {
-                if (preg_match('#^https?://\S+$#i', $value)) {
+                if (is_array($value)) {
+                    // A linked value: authority URI with its label.
+                    $data['dcterms:' . $name][] = [
+                        'type' => 'uri',
+                        'property_id' => $this->propertyIds[$name],
+                        '@id' => $value['uri'],
+                        'o:label' => $value['label'],
+                    ];
+                } elseif (preg_match('#^https?://\S+$#i', $value)) {
                     $data['dcterms:' . $name][] = [
                         'type' => 'uri',
                         'property_id' => $this->propertyIds[$name],
