@@ -39,16 +39,6 @@ See the general documentation on
 2. In the Omeka admin, go to **Modules** and click **Install** next to
    Preservica Connector.
 
-If you get an error message during configuration, check the proxy settings in local.config.ini, specifically the value for 'http_client,' which is located in the Omeka-S install location. It will look like the following:
-
-    'http_client' => [
-...
-'proxy_host' => 'proxy_url',
-'proxy_port' => ##,
-    ],
-
-There's additional lines that might need to be configured under the proxy information, like a user and password for authentication if it's required. 
-
 ## Configuration
 
 Go to **Modules → Preservica Connector → Configure**.
@@ -63,6 +53,16 @@ Go to **Modules → Preservica Connector → Configure**.
 
 When you save, the module logs in to Preservica once and tells you whether
 the connection works.
+
+If you get an error message during configuration, check the proxy settings in local.config.ini, specifically the value for 'http_client,' which is located in the Omeka-S install location. It will look like the following:
+
+    'http_client' => [
+...
+'proxy_host' => 'proxy_url',
+'proxy_port' => ##,
+    ],
+
+There's additional lines that might need to be configured under the proxy information, like a user and password for authentication if it's required. 
 
 ## Importing
 
