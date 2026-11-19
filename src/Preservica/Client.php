@@ -205,6 +205,122 @@ class Client
     }
 
     /**
+     * Fetch a folder's title, description and parent.
+     *
+     * @return array ['ref', 'title', 'description', 'parent' => string|null]
+     */
+    public function getFolder($ref)
+    {
+        $this->assertRef($ref);
+        $xpath = $this->requestXml('/api/entity/structural-objects/' . $ref);
+        $base = '//*[local-name()="StructuralObject"]/*[local-name()="%s"]';
+        $parent = strtolower($this->text($xpath, sprintf($base, 'Parent')));
+        return [
+            'ref' => strtolower($ref),
+            'title' => $this->text($xpath, sprintf($base, 'Title')),
+            'description' => $this->text($xpath, sprintf($base, 'Description')),
+            'parent' => preg_match(self::REF_PATTERN, $parent) ? $parent : null,
+        ];
+    }
+
+    /**
+     * The folders from the top of the archive down to a folder, inclusive.
+     *
+     * @return array [['ref', 'title', 'description', 'parent'], ...]
+     */
+    public function getFolderPath($ref)
+    {
+        $path = [];
+        $seen = [];
+        // Preservica trees are rarely deep; the limit guards against loops.
+        while ($ref && !isset($seen[$ref]) && count($path) < 50) {
+            $seen[$ref] = true;
+            $folder = $this->getFolder($ref);
+            array_unshift($path, $folder);
+            $ref = $folder['parent'];
+        }
+        return $path;
+    }
+
+    /**
+     * List one page of a folder's children, or of the top-level folders.
+     *
+     * @param string|null $ref Folder reference; null for the top level
+     * @param int $start Zero-based offset
+     * @param int $max Page size (Preservica allows up to 1000)
+     * @return array ['total' => int, 'folders' => [['ref', 'title']], 'assets' => [['ref', 'title']]]
+     */
+    public function listChildren($ref = null, $start = 0, $max = 100)
+    {
+        if ($ref === null) {
+            $path = '/api/entity/root/children';
+        } else {
+            $this->assertRef($ref);
+            $path = '/api/entity/structural-objects/' . $ref . '/children';
+        }
+        $xpath = $this->requestXml($path, ['start' => (int) $start, 'max' => (int) $max]);
+        $page = ['total' => 0, 'folders' => [], 'assets' => []];
+        foreach ($xpath->query('//*[local-name()="Children"]/*[local-name()="Child"]') as $node) {
+            $childRef = strtolower($node->getAttribute('ref'));
+            if (!preg_match(self::REF_PATTERN, $childRef)) {
+                continue;
+            }
+            $child = ['ref' => $childRef, 'title' => $node->getAttribute('title')];
+            switch ($node->getAttribute('type')) {
+                case 'SO':
+                    $page['folders'][] = $child;
+                    break;
+                case 'IO':
+                    $page['assets'][] = $child;
+                    break;
+            }
+        }
+        $total = $this->text($xpath, '//*[local-name()="Paging"]/*[local-name()="TotalResults"]');
+        $page['total'] = $total === '' ? count($page['folders']) + count($page['assets']) : (int) $total;
+        return $page;
+    }
+
+    /**
+     * Walk the assets in a folder, page by page, optionally descending into
+     * its subfolders (breadth first). Each asset is yielded once.
+     *
+     * @param string $ref Folder reference
+     * @param bool $recursive Include assets in subfolders
+     * @param int $pageSize
+     * @return \Generator Yields asset references
+     */
+    public function walkFolderAssets($ref, $recursive = true, $pageSize = 100)
+    {
+        $this->assertRef($ref);
+        $queue = [strtolower($ref)];
+        $seenFolders = [strtolower($ref) => true];
+        $seenAssets = [];
+        while ($queue) {
+            $folderRef = array_shift($queue);
+            $start = 0;
+            do {
+                $page = $this->listChildren($folderRef, $start, $pageSize);
+                foreach ($page['assets'] as $asset) {
+                    if (!isset($seenAssets[$asset['ref']])) {
+                        $seenAssets[$asset['ref']] = true;
+                        yield $asset['ref'];
+                    }
+                }
+                if ($recursive) {
+                    foreach ($page['folders'] as $folder) {
+                        if (!isset($seenFolders[$folder['ref']])) {
+                            $seenFolders[$folder['ref']] = true;
+                            $queue[] = $folder['ref'];
+                        }
+                    }
+                }
+                $count = count($page['assets']) + count($page['folders']);
+                $start += $pageSize;
+            } while ($count > 0 && $start < $page['total']);
+        }
+    }
+
+    /**
      * Fetch an asset thumbnail from the Content API.
      *
      * @return array|null ['body' => string, 'type' => string] or null if none
@@ -475,9 +591,9 @@ class Client
     /**
      * @return DOMXPath
      */
-    protected function requestXml($path)
+    protected function requestXml($path, array $query = [])
     {
-        $response = $this->request($path);
+        $response = $this->request($path, $query ? ['query' => $query] : []);
         $dom = new DOMDocument;
         $previous = libxml_use_internal_errors(true);
         $loaded = $dom->loadXML($response->getBody(), LIBXML_NONET);

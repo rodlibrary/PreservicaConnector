@@ -35,12 +35,34 @@ class Module extends AbstractModule
         $connection->executeStatement('CREATE TABLE preservica_item (id INT AUTO_INCREMENT NOT NULL, item_id INT NOT NULL, job_id INT NOT NULL, preservica_ref VARCHAR(36) NOT NULL, UNIQUE INDEX UNIQ_PRESERVICA_ITEM_ITEM (item_id), INDEX IDX_PRESERVICA_ITEM_JOB (job_id), INDEX IDX_PRESERVICA_ITEM_REF (preservica_ref), PRIMARY KEY(id)) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB');
         $connection->executeStatement('ALTER TABLE preservica_item ADD CONSTRAINT FK_PRESERVICA_ITEM_ITEM FOREIGN KEY (item_id) REFERENCES item (id) ON DELETE CASCADE');
         $connection->executeStatement('ALTER TABLE preservica_item ADD CONSTRAINT FK_PRESERVICA_ITEM_JOB FOREIGN KEY (job_id) REFERENCES job (id) ON DELETE CASCADE');
+        $this->installFolderSupport($connection);
+    }
+
+    public function upgrade($oldVersion, $newVersion, ServiceLocatorInterface $serviceLocator)
+    {
+        $connection = $serviceLocator->get('Omeka\Connection');
+        if (version_compare($oldVersion, '0.3.0', '<')) {
+            $this->installFolderSupport($connection);
+        }
+    }
+
+    /**
+     * Schema added in 0.3.0 for importing whole folders.
+     */
+    protected function installFolderSupport($connection)
+    {
+        // What a folder import covered, and the item set it created, if any.
+        $connection->executeStatement('ALTER TABLE preservica_import ADD folder_ref VARCHAR(36) DEFAULT NULL, ADD folder_title VARCHAR(255) DEFAULT NULL, ADD include_subfolders TINYINT(1) DEFAULT 0 NOT NULL, ADD created_item_set_id INT DEFAULT NULL');
+        // The item set made for each folder, so later imports reuse it.
+        $connection->executeStatement('CREATE TABLE preservica_item_set (id INT AUTO_INCREMENT NOT NULL, item_set_id INT NOT NULL, folder_ref VARCHAR(36) NOT NULL, UNIQUE INDEX UNIQ_PRESERVICA_ITEM_SET_ITEM_SET (item_set_id), UNIQUE INDEX UNIQ_PRESERVICA_ITEM_SET_FOLDER (folder_ref), PRIMARY KEY(id)) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB');
+        $connection->executeStatement('ALTER TABLE preservica_item_set ADD CONSTRAINT FK_PRESERVICA_ITEM_SET_ITEM_SET FOREIGN KEY (item_set_id) REFERENCES item_set (id) ON DELETE CASCADE');
     }
 
     public function uninstall(ServiceLocatorInterface $serviceLocator)
     {
-        // Imported items are ordinary Omeka items and are kept.
+        // Imported items and item sets are ordinary Omeka resources and are kept.
         $connection = $serviceLocator->get('Omeka\Connection');
+        $connection->executeStatement('DROP TABLE IF EXISTS preservica_item_set');
         $connection->executeStatement('DROP TABLE IF EXISTS preservica_item');
         $connection->executeStatement('DROP TABLE IF EXISTS preservica_import');
 

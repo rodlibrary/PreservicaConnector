@@ -68,7 +68,15 @@ $this->htmlElement('body')->appendAttribute('class', 'preservica-connector brows
                     <input type="checkbox" name="undo[]" form="preservica-undo-form" value="<?php echo $job->id(); ?>"<?php echo $undoJob ? ' disabled' : ''; ?> aria-label="<?php echo $escape(sprintf($translate('Undo import job #%s'), $job->id())); ?>">
                     <div>
                         <?php echo $job->link(sprintf($translate('Job #%s'), $job->id())); ?>
-                        <?php if ((string) $import['query'] !== ''): ?>
+                        <?php if ((string) $import['folder_ref'] !== ''): ?>
+                        <span class="preservica-muted"><?php echo $this->hyperlink(
+                            sprintf(
+                                $import['include_subfolders'] ? $translate('Folder: %s, with subfolders') : $translate('Folder: %s'),
+                                (string) $import['folder_title'] !== '' ? $import['folder_title'] : $import['folder_ref']
+                            ),
+                            $this->url('admin/preservica-connector/browse', [], ['query' => ['folder' => $import['folder_ref']]])
+                        ); ?></span>
+                        <?php elseif ((string) $import['query'] !== ''): ?>
                         <span class="preservica-muted"><?php echo sprintf($translate('Search: %s'), $escape($import['query'])); ?></span>
                         <?php endif; ?>
                         <?php if ((string) $import['comment'] !== ''): ?>

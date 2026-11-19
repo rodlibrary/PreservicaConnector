@@ -45,6 +45,31 @@ $files = [
     'c3333333-3333-4333-8333-33333333dead' => 'interview.jpg',
 ];
 
+// Folder tree. Children are listed folders first, then assets.
+//   University Archives                       f1
+//     Commencement program (asset)            a2
+//     Photographs                             f2
+//       Campus aerial photograph (asset)      a1
+//       Oral histories                        f3
+//         Campus oral history (asset)         a3  (download fails)
+//   Yearbooks (120 metadata-only assets)      f4
+//   Empty folder                              f5
+$F = function ($n) { return sprintf('f%07d-0000-4000-8000-000000000000', $n); };
+$folders = [
+    $F(1) => ['title' => 'University Archives', 'description' => 'Records of the university.', 'parent' => null, 'children' => [['SO', $F(2)], ['IO', 'a2222222-2222-4222-8222-222222222222']]],
+    $F(2) => ['title' => 'Photographs', 'description' => '', 'parent' => $F(1), 'children' => [['SO', $F(3)], ['IO', 'a1111111-1111-4111-8111-111111111111']]],
+    $F(3) => ['title' => 'Oral histories', 'description' => '', 'parent' => $F(2), 'children' => [['IO', 'a3333333-3333-4333-8333-333333333333']]],
+    $F(4) => ['title' => 'Yearbooks', 'description' => 'Digitized yearbooks.', 'parent' => null, 'children' => []],
+    $F(5) => ['title' => 'Empty folder', 'description' => '', 'parent' => null, 'children' => []],
+];
+// Not returned by search, so the search tests see only the three assets above.
+for ($n = 1; $n <= 120; $n++) {
+    $ref = sprintf('b0000000-0000-4000-8000-%012d', $n);
+    $assets[$ref] = ['title' => sprintf('Yearbook %d', 1900 + $n), 'description' => '', 'dc' => [], 'reps' => [], 'unsearchable' => true];
+    $folders[$F(4)]['children'][] = ['IO', $ref];
+}
+$rootChildren = [['SO', $F(1)], ['SO', $F(4)], ['SO', $F(5)]];
+
 $json = function ($data, $code = 200) { http_response_code($code); header('Content-Type: application/json'); echo json_encode($data); };
 $xml = function ($body) { header('Content-Type: application/xml'); echo '<?xml version="1.0" encoding="UTF-8"?>' . $body; };
 $image = function ($label, $type, $w = 640, $h = 480) {
@@ -84,6 +109,9 @@ if ($path === '/api/content/search' && $method === 'POST') {
     $term = strtolower($q['q'] ?? '');
     $hits = [];
     foreach ($assets as $ref => $asset) {
+        if (!empty($asset['unsearchable'])) {
+            continue;
+        }
         if ($term === '%' || strpos(strtolower($asset['title'] . ' ' . $asset['description']), $term) !== false) {
             $hits[$ref] = $asset;
         }
@@ -105,6 +133,30 @@ if ($path === '/api/content/thumbnail') {
     $ref = substr($_GET['id'] ?? '', strlen('sdb:IO|'));
     if (!isset($assets[$ref])) { http_response_code(404); return; }
     return $image(substr($assets[$ref]['title'], 0, 12), 'png', 128, 128);
+}
+
+$childrenXml = function (array $children) use ($assets, $folders, $path, $xml) {
+    $start = (int) ($_GET['start'] ?? 0);
+    $max = min(1000, (int) ($_GET['max'] ?? 100));
+    $page = array_slice($children, $start, $max);
+    $out = '';
+    foreach ($page as [$type, $ref]) {
+        $title = $type === 'SO' ? $folders[$ref]['title'] : $assets[$ref]['title'];
+        $kind = $type === 'SO' ? 'structural-objects' : 'information-objects';
+        $out .= '<Child title="' . htmlspecialchars($title) . '" ref="' . $ref . '" type="' . $type . '">' . BASE . "/api/entity/$kind/$ref</Child>";
+    }
+    $next = $start + $max < count($children) ? '<Next>' . BASE . $path . '?start=' . ($start + $max) . '&amp;max=' . $max . '</Next>' : '';
+    return $xml('<ChildrenResponse xmlns="' . NS_ENTITY . '"><Children>' . $out . '</Children><Paging>' . $next . '<TotalResults>' . count($children) . '</TotalResults></Paging><AdditionalInformation><Self>' . BASE . $path . '</Self></AdditionalInformation></ChildrenResponse>');
+};
+if ($path === '/api/entity/root/children') {
+    return $childrenXml($rootChildren);
+}
+if (preg_match('#^/api/entity/structural-objects/([0-9a-f-]{36})/children$#', $path, $m) && isset($folders[$m[1]])) {
+    return $childrenXml($folders[$m[1]]['children']);
+}
+if (preg_match('#^/api/entity/structural-objects/([0-9a-f-]{36})$#', $path, $m) && isset($folders[$m[1]])) {
+    $f = $folders[$m[1]];
+    return $xml('<EntityResponse xmlns="' . NS_ENTITY . '" xmlns:xip="' . NS_XIP . '"><xip:StructuralObject><xip:Ref>' . $m[1] . '</xip:Ref><xip:Title>' . htmlspecialchars($f['title']) . '</xip:Title><xip:Description>' . htmlspecialchars($f['description']) . '</xip:Description><xip:SecurityTag>open</xip:SecurityTag>' . ($f['parent'] ? '<xip:Parent>' . $f['parent'] . '</xip:Parent>' : '') . '</xip:StructuralObject><AdditionalInformation><Self>' . BASE . $path . '</Self></AdditionalInformation></EntityResponse>');
 }
 
 $uuid = '([0-9a-f-]{36})';

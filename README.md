@@ -2,8 +2,8 @@
 
 An [Omeka S](https://omeka.org/s/) module that searches a
 [Preservica](https://preservica.com/) digital preservation system from the
-Omeka admin and imports the assets you pick as Omeka items, ready to use in
-sites and exhibits.
+Omeka admin and imports the assets you pick, or whole folders, as Omeka items,
+ready to use in sites and exhibits.
 
 For each selected asset the module:
 
@@ -77,11 +77,37 @@ There's additional lines that might need to be configured under the proxy inform
 The selection covers the page of results you are looking at; show up to 100
 results per page to import more in one go.
 
+### Importing a whole folder
+
+1. Go to **Preservica Connector → Browse folders** and open the folder you
+   want, for example a collection. The path at the top takes you back up.
+2. Under **Import the folder**, leave **Include subfolders** ticked to import
+   everything below the folder, at any depth, or untick it for just the
+   assets directly in it.
+3. **Add to item set** defaults to an item set named after the folder, with
+   the folder's description. All the assets, including those in subfolders,
+   go into that one item set. It is created the first time the folder is
+   imported and reused after that. You can choose an existing item set or no
+   item set instead.
+4. Click **Import folder**.
+
+Assets that are already in Omeka are not imported again, but they are added
+to the chosen item set, so the item set ends up holding the whole folder.
+Importing the same folder again later picks up only assets added to
+Preservica since. Large folders are fine: the job reads the folder from
+Preservica 100 entries at a time.
+
+You can also tick individual assets in a folder and import just those.
+
+### Past imports and undo
+
 **Preservica Connector → Past imports** lists every import with its results
 and a link to the items it created. The job log (click the job number) has
 one line per asset, including the reason for any failure. To remove the
 items and files an import created, tick it and click
-**Undo selected imports**. Nothing is ever changed in Preservica.
+**Undo selected imports**. Undoing a folder import also deletes the folder's
+item set if the import created it and nothing else is left in it. Nothing is
+ever changed in Preservica.
 
 You can also attach a Preservica file to an existing item: on the item's
 **Media** tab choose **Preservica** and enter an asset reference.
@@ -152,11 +178,11 @@ over; undo the import and import again to refresh.
 
 ## Development
 
-`test/` contains a stub of the Preservica API (`mock-preservica.php`) and two
-scripts that drive a real Omeka S install against it, plus a unit test of
-the MODS crosswalk (`php test/mods-mapper-test.php`): `e2e.py` (install,
-configure, search, import, re-import, undo) and `browser.py` (the same flow in
-headless Chrome). The directory is left out of release zips.
+`test/` contains a stub of the Preservica API (`mock-preservica.php`, with a
+small folder tree) and scripts that drive a real Omeka S install against it:
+`e2e.py` (install, configure, search, import, re-import, folder import, undo),
+`browser.py` and `browser-folders.py` (the same flows in headless Chrome), and
+a unit test of the MODS crosswalk (`php test/mods-mapper-test.php`). The directory is left out of release zips.
 
 To publish a release on omeka.org, tag the version set in `config/module.ini`
 and attach a zip built with:

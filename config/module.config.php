@@ -30,6 +30,7 @@ return [
     'form_elements' => [
         'invokables' => [
             Form\ImportForm::class => Form\ImportForm::class,
+            Form\FolderImportForm::class => Form\FolderImportForm::class,
         ],
     ],
     'view_manager' => [
@@ -47,6 +48,11 @@ return [
                     [
                         'label' => 'Search and import', // @translate
                         'route' => 'admin/preservica-connector',
+                        'resource' => 'PreservicaConnector\Controller\Index',
+                    ],
+                    [
+                        'label' => 'Browse folders', // @translate
+                        'route' => 'admin/preservica-connector/browse',
                         'resource' => 'PreservicaConnector\Controller\Index',
                     ],
                     [
@@ -79,6 +85,20 @@ return [
                                 'options' => [
                                     'route' => '/import',
                                     'defaults' => ['action' => 'import'],
+                                ],
+                            ],
+                            'browse' => [
+                                'type' => 'Literal',
+                                'options' => [
+                                    'route' => '/browse',
+                                    'defaults' => ['action' => 'browse'],
+                                ],
+                            ],
+                            'import-folder' => [
+                                'type' => 'Literal',
+                                'options' => [
+                                    'route' => '/import-folder',
+                                    'defaults' => ['action' => 'import-folder'],
                                 ],
                             ],
                             'past-imports' => [

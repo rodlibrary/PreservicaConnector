@@ -91,3 +91,32 @@
 #preservica-selected-count {
     margin-left: 12px;
 }
+
+.preservica-breadcrumbs ol {
+    list-style: none;
+    margin: 0 0 18px;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.preservica-breadcrumbs li + li::before {
+    content: "›";
+    padding: 0 8px;
+    color: #676767;
+}
+
+.preservica-breadcrumbs [aria-current] {
+    font-weight: bold;
+}
+
+.preservica-folder-import {
+    margin: 0 0 24px;
+}
+
+.preservica-folder-icon {
+    flex: 0 0 64px;
+    width: 64px;
+    height: 40px;
+    fill: #a3c4d6;
+}

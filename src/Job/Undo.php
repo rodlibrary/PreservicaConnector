@@ -4,8 +4,9 @@ namespace PreservicaConnector\Job;
 use Omeka\Job\AbstractJob;
 
 /**
- * Deletes the Omeka items (and their files) created by one import. Nothing
- * is changed in Preservica.
+ * Deletes the Omeka items (and their files) created by one import, and the
+ * folder item set it created if that is now empty. Items that the import only
+ * added to an item set are left alone. Nothing is changed in Preservica.
  *
  * Arguments: import_job (id of the import job to undo).
  */
@@ -36,5 +37,22 @@ class Undo extends AbstractJob
             }
         }
         $logger->info(sprintf('Deleted %s item(s).', $deleted));
+
+        // Remove the folder item set this import created, if nothing else
+        // has been put in it since.
+        $itemSetId = (int) $connection->fetchOne(
+            'SELECT created_item_set_id FROM preservica_import WHERE job_id = ?',
+            [(int) $this->getArg('import_job')]
+        );
+        if ($itemSetId && !$this->shouldStop()) {
+            $remaining = $connection->fetchOne('SELECT COUNT(*) FROM item_item_set WHERE item_set_id = ?', [$itemSetId]);
+            $exists = $connection->fetchOne('SELECT 1 FROM item_set WHERE id = ?', [$itemSetId]);
+            if ($exists && !$remaining) {
+                $api->delete('item_sets', $itemSetId);
+                $logger->info(sprintf('Deleted item set #%s, which this import created.', $itemSetId));
+            } elseif ($exists) {
+                $logger->info(sprintf('Kept item set #%s: it still has %s item(s).', $itemSetId, $remaining));
+            }
+        }
     }
 }

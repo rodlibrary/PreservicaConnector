@@ -6,6 +6,7 @@ use Laminas\Form\Form;
 use Laminas\Mvc\Controller\AbstractActionController;
 use Laminas\View\Model\ViewModel;
 use Omeka\Stdlib\Message;
+use PreservicaConnector\Form\FolderImportForm;
 use PreservicaConnector\Form\ImportForm;
 use PreservicaConnector\Job\Import;
 use PreservicaConnector\Job\Undo;
@@ -14,6 +15,8 @@ use PreservicaConnector\Preservica\Client;
 class IndexController extends AbstractActionController
 {
     const PER_PAGE_OPTIONS = [25, 50, 100];
+
+    const BROWSE_PER_PAGE = 100;
 
     protected $client;
 
@@ -88,6 +91,147 @@ class IndexController extends AbstractActionController
             'importForm' => $importForm,
         ]);
         return $view;
+    }
+
+    /**
+     * Browse the Preservica folder tree, to import a folder or pick assets.
+     */
+    public function browseAction()
+    {
+        $folderRef = strtolower(trim((string) $this->params()->fromQuery('folder', '')));
+        if ($folderRef !== '' && !preg_match(Client::REF_PATTERN, $folderRef)) {
+            $folderRef = '';
+        }
+        $page = max(1, (int) $this->params()->fromQuery('page', 1));
+
+        $view = new ViewModel([
+            'configured' => $this->client->isConfigured(),
+            'host' => $this->client->getBaseUrl(),
+            'path' => [],
+            'folder' => null,
+            'children' => null,
+            'imported' => [],
+            'importForm' => null,
+            'folderForm' => null,
+            'folderItemSet' => null,
+        ]);
+        if (!$this->client->isConfigured()) {
+            return $view;
+        }
+
+        try {
+            $path = $folderRef !== '' ? $this->client->getFolderPath($folderRef) : [];
+            $children = $this->client->listChildren(
+                $folderRef !== '' ? $folderRef : null,
+                ($page - 1) * self::BROWSE_PER_PAGE,
+                self::BROWSE_PER_PAGE
+            );
+        } catch (\Exception $e) {
+            $this->messenger()->addError($e->getMessage());
+            return $view;
+        }
+        $folder = $path ? end($path) : null;
+
+        $refs = array_column($children['assets'], 'ref');
+        $imported = [];
+        if ($refs) {
+            $rows = $this->connection->fetchAllAssociative(
+                'SELECT preservica_ref, item_id FROM preservica_item WHERE preservica_ref IN (?)',
+                [$refs],
+                [Connection::PARAM_STR_ARRAY]
+            );
+            foreach ($rows as $row) {
+                $imported[$row['preservica_ref']] = (int) $row['item_id'];
+            }
+        }
+
+        $importForm = null;
+        if ($children['assets']) {
+            $importForm = $this->getForm(ImportForm::class);
+            $importForm->setAttribute('action', $this->url()->fromRoute('admin/preservica-connector/import'));
+            $importForm->setAttribute('id', 'preservica-import-form');
+            $importForm->get('query')->setValue($folder ? sprintf($this->translate('Folder: %s'), $folder['title']) : '');
+        }
+
+        $folderForm = null;
+        $folderItemSet = null;
+        if ($folder) {
+            $folderForm = $this->getForm(FolderImportForm::class);
+            $folderForm->setAttribute('action', $this->url()->fromRoute('admin/preservica-connector/import-folder'));
+            $folderForm->setAttribute('id', 'preservica-folder-form');
+            $folderForm->get('folder')->setValue($folder['ref']);
+            $itemSetId = $this->connection->fetchOne(
+                'SELECT pis.item_set_id FROM preservica_item_set pis JOIN item_set ON item_set.id = pis.item_set_id WHERE pis.folder_ref = ?',
+                [$folder['ref']]
+            );
+            if ($itemSetId) {
+                $folderItemSet = $this->api()->read('item_sets', $itemSetId)->getContent();
+            }
+            $title = $folder['title'] !== '' ? $folder['title'] : $this->translate('[Untitled]');
+            $element = $folderForm->get('item_set');
+            $element->setOption('prepend_value_options', [
+                'folder' => $folderItemSet
+                    ? sprintf($this->translate('This folder\'s item set: %s'), $folderItemSet->displayTitle())
+                    : sprintf($this->translate('New item set: %s'), $title),
+                '' => $this->translate('No item set'),
+            ]);
+        }
+
+        $this->paginator($children['total'], $page, self::BROWSE_PER_PAGE);
+        $view->setVariables([
+            'path' => $path,
+            'folder' => $folder,
+            'children' => $children,
+            'imported' => $imported,
+            'importForm' => $importForm,
+            'folderForm' => $folderForm,
+            'folderItemSet' => $folderItemSet,
+        ]);
+        return $view;
+    }
+
+    /**
+     * Start a background job that imports every asset in a folder.
+     */
+    public function importFolderAction()
+    {
+        if (!$this->getRequest()->isPost()) {
+            return $this->redirect()->toRoute('admin/preservica-connector/browse');
+        }
+        $form = $this->getForm(FolderImportForm::class);
+        $form->setData($this->params()->fromPost());
+        if (!$form->isValid()) {
+            $this->messenger()->addFormErrors($form);
+            return $this->redirect()->toRoute('admin/preservica-connector/browse');
+        }
+        $data = $form->getData();
+        $folderRef = strtolower((string) $data['folder']);
+        if (!preg_match(Client::REF_PATTERN, $folderRef)) {
+            $this->messenger()->addError('Choose a folder to import.'); // @translate
+            return $this->redirect()->toRoute('admin/preservica-connector/browse');
+        }
+        $itemSet = (string) $data['item_set'];
+        if ($itemSet !== 'folder') {
+            $itemSet = $itemSet !== '' ? (int) $itemSet : null;
+        }
+
+        $job = $this->jobDispatcher()->dispatch(Import::class, [
+            'folder' => $folderRef,
+            'recursive' => (bool) $data['recursive'],
+            'item_set' => $itemSet,
+            'comment' => trim((string) $data['comment']),
+        ]);
+        $message = new Message(
+            'Importing a Preservica folder in %s', // @translate
+            sprintf(
+                '<a href="%s">%s</a>',
+                htmlspecialchars($this->url()->fromRoute('admin/id', ['controller' => 'job', 'id' => $job->getId()])),
+                sprintf($this->translate('job #%s'), $job->getId())
+            )
+        );
+        $message->setEscapeHtml(false);
+        $this->messenger()->addSuccess($message);
+        return $this->redirect()->toRoute('admin/preservica-connector/past-imports');
     }
 
     /**

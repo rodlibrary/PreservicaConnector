@@ -210,6 +210,111 @@ check('items deleted by undo', len(api('items', preservica_import_job=job_id)) =
 r = s.get(aerial['o:media'][0]['@id'])
 check('media deleted by undo', r.status_code == 404, r.status_code)
 
+# --- folders
+F = lambda n: 'f%07d-0000-4000-8000-000000000000' % n
+BROWSE = B + '/admin/preservica-connector/browse'
+
+
+def import_row(job):
+    """The past-imports table row for an import job, as text."""
+    page = soup(s.get(B + '/admin/preservica-connector/past-imports'))
+    for row in page.select('table.preservica-imports tbody tr'):
+        if row.find('a', string='Job #%s' % job):
+            return row.get_text(' ', strip=True)
+    return ''
+
+
+def import_folder(ref, recursive='1', item_set='folder', comment=''):
+    page = soup(s.get(BROWSE, params={'folder': ref}))
+    form, data = form_data(page, '#preservica-folder-form')
+    data.update({'recursive': recursive, 'item_set': item_set, 'comment': comment})
+    r = s.post(B + '/admin/preservica-connector/import-folder', data=data)
+    m = re.search(r'/admin/job/(\d+)', r.text)
+    check('folder import dispatched', m is not None, messages(soup(r)))
+    check('folder import job completed', wait_job(m.group(1)) == 'Completed', m.group(1))
+    return m.group(1)
+
+
+def undo(job):
+    page = soup(s.get(B + '/admin/preservica-connector/past-imports'))
+    form, data = form_data(page, '#preservica-undo-form')
+    data['undo[]'] = [job]
+    s.post(B + '/admin/preservica-connector/past-imports', data=data)
+    for _ in range(60):
+        m = re.search(r'Undone in job #(\d+)', import_row(job))
+        if m:
+            check('undo of job %s completed' % job, wait_job(m.group(1)) == 'Completed')
+            return m.group(1)
+        time.sleep(1)
+    check('undo of job %s dispatched' % job, False)
+
+
+def item_sets():
+    return {i['o:title']: i for i in api('item_sets', per_page=100)}
+
+
+def item_set_size(item_set):
+    return len(api('items', item_set_id=item_set['o:id'], per_page=500))
+
+
+page = soup(s.get(BROWSE))
+names = [a.get_text(strip=True) for a in page.select('.preservica-folder-row a.preservica-title')]
+check('top level lists the 3 top folders', names == ['University Archives', 'Yearbooks', 'Empty folder'], names)
+check('no folder import form at the top level', page.select_one('#preservica-folder-form') is None)
+page = soup(s.get(BROWSE, params={'folder': F(2)}))
+crumbs = [li.get_text(strip=True) for li in page.select('.preservica-breadcrumbs li')]
+check('breadcrumbs show the folder path', crumbs == ['Top level', 'University Archives', 'Photographs'], crumbs)
+check('subfolders and assets listed', [a.get_text(strip=True) for a in page.select('.preservica-folder-row a.preservica-title')] == ['Oral histories'] and len(page.select('input[name="refs[]"]')) == 1)
+check('folder form defaults: subfolders on, folder item set', page.select_one('#preservica-folder-recursive').has_attr('checked') and page.select_one('#preservica-folder-item-set option[selected]')['value'] == 'folder')
+check('default item set option names the folder', 'New item set: Photographs' in page.select_one('#preservica-folder-item-set').get_text())
+check('browse page 1 of 120 assets shows 100', len(soup(s.get(BROWSE, params={'folder': F(4)})).select('input[name="refs[]"]')) == 100)
+check('browse page 2 shows the other 20', len(soup(s.get(BROWSE, params={'folder': F(4), 'page': 2})).select('input[name="refs[]"]')) == 20)
+r = s.get(BROWSE, params={'folder': '../../etc'})
+check('invalid folder reference falls back to the top level', r.status_code == 200 and 'University Archives' in r.text)
+
+empty_job = import_folder(F(5))
+check('empty folder imports nothing and makes no item set', '0 added' in import_row(empty_job) and not item_sets(), item_sets().keys())
+
+# The aerial photograph is imported on its own first, outside any item set.
+page = soup(s.get(B + '/admin/preservica-connector', params={'q': 'aerial'}))
+form, data = form_data(page, '#preservica-import-form')
+data['refs[]'] = ['a1111111-1111-4111-8111-111111111111']
+single_job = re.search(r'/admin/job/(\d+)', s.post(B + '/admin/preservica-connector/import', data=data).text).group(1)
+check('single asset imported', wait_job(single_job) == 'Completed' and '1 added' in import_row(single_job))
+
+archives_job = import_folder(F(1), comment='whole collection')
+row = import_row(archives_job)
+check('collection import walks subfolders', '1 added, 1 files, 1 already imported, 1 failed' in row, row)
+check('past imports names the folder', 'Folder: University Archives, with subfolders' in row and 'whole collection' in row, row)
+sets = item_sets()
+check('one item set named after the top folder', list(sets) == ['University Archives'], list(sets))
+archives = sets['University Archives']
+check('item set has the folder description and reference', archives['dcterms:description'][0]['@value'] == 'Records of the university.' and archives['dcterms:identifier'][0]['@value'] == F(1))
+titles = sorted(i['o:title'] for i in api('items', item_set_id=archives['o:id']))
+check('new and already-imported assets from all subfolders are in the item set', titles == ['Campus aerial photograph, 1954', 'Commencement program'], titles)
+log = s.get(f'{B}/admin/job/{archives_job}/log').text
+check('job log explains the already-imported asset', 'already imported as item' in log and 'added it to item set' in log, log)
+
+again_job = import_folder(F(1), recursive='0')
+row = import_row(again_job)
+check('re-import without subfolders: 1 already imported', '0 added, 0 files, 1 already imported' in row and 'with subfolders' not in row, row)
+check('re-import reuses the folder item set', list(item_sets()) == ['University Archives'] and item_set_size(archives) == 2)
+page = soup(s.get(BROWSE, params={'folder': F(1)}))
+check('browse page notes the earlier import', 'has been imported before' in page.get_text() and "This folder's item set: University Archives" in page.select_one('#preservica-folder-item-set').get_text())
+
+yearbooks_job = import_folder(F(4))
+row = import_row(yearbooks_job)
+check('120-asset folder imported across pages', '120 added, 0 files' in row, row)
+yearbooks = item_sets()['Yearbooks']
+check('all 120 in the Yearbooks item set', item_set_size(yearbooks) == 120)
+
+undo(archives_job)
+check('undo removes only the items that import created', [i['o:title'] for i in api('items', item_set_id=archives['o:id'])] == ['Campus aerial photograph, 1954'])
+check('undo keeps the item set while it still has items', 'University Archives' in item_sets())
+undo(yearbooks_job)
+check('undo removes the folder items', len(api('items', per_page=500)) == 1)
+check('undo removes the now-empty item set it created', 'Yearbooks' not in item_sets(), list(item_sets()))
+
 logins = requests.get('http://127.0.0.1:9090/__state', proxies={'http': None}).json()['logins']
 print('mock Preservica logins during run:', logins)
 print('ALL PASSED')
