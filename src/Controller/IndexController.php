@@ -9,7 +9,9 @@ use Omeka\Stdlib\Message;
 use PreservicaConnector\Form\FolderImportForm;
 use PreservicaConnector\Form\ImportForm;
 use PreservicaConnector\Job\Import;
+use PreservicaConnector\Job\LinkIiif;
 use PreservicaConnector\Job\Undo;
+use PreservicaConnector\Media\IiifLinker;
 use PreservicaConnector\Preservica\Client;
 
 class IndexController extends AbstractActionController
@@ -300,6 +302,10 @@ class IndexController extends AbstractActionController
             $form->setData($post);
             if ($form->isValid()) {
                 $jobIds = isset($post['undo']) && is_array($post['undo']) ? array_map('intval', $post['undo']) : [];
+                if (isset($post['action']) && $post['action'] === 'link') {
+                    $this->dispatchLinkJobs($jobIds);
+                    return $this->redirect()->toRoute('admin/preservica-connector/past-imports');
+                }
                 foreach ($jobIds as $jobId) {
                     $import = $this->connection->fetchAssociative(
                         'SELECT id FROM preservica_import WHERE job_id = ? AND undo_job_id IS NULL',
@@ -337,6 +343,9 @@ class IndexController extends AbstractActionController
         $imports = [];
         foreach ($rows as $row) {
             $row['job'] = $this->api()->read('jobs', $row['job_id'])->getContent();
+            $row['link_job'] = $row['link_job_id']
+                ? $this->api()->read('jobs', $row['link_job_id'])->getContent()
+                : null;
             $row['undo_job'] = $row['undo_job_id']
                 ? $this->api()->read('jobs', $row['undo_job_id'])->getContent()
                 : null;
@@ -346,7 +355,37 @@ class IndexController extends AbstractActionController
         return new ViewModel([
             'imports' => $imports,
             'form' => $form,
+            'iiifEnabled' => $this->settings()->get('preservicaconnector_media_mode') === IiifLinker::MODE_IIIF,
         ]);
+    }
+
+    /**
+     * Start jobs that switch the items of the given imports to IIIF links.
+     *
+     * @param int[] $jobIds Import job ids
+     */
+    protected function dispatchLinkJobs(array $jobIds)
+    {
+        if ($this->settings()->get('preservicaconnector_media_mode') !== IiifLinker::MODE_IIIF) {
+            $this->messenger()->addError('Turn on "Link to IIIF manifests" in the module configuration first.'); // @translate
+            return;
+        }
+        if (!$jobIds) {
+            $this->messenger()->addError('Select at least one import to switch to IIIF links.'); // @translate
+            return;
+        }
+        foreach ($jobIds as $jobId) {
+            $import = $this->connection->fetchAssociative(
+                'SELECT id FROM preservica_import WHERE job_id = ? AND undo_job_id IS NULL',
+                [$jobId]
+            );
+            if (!$import) {
+                continue;
+            }
+            $linkJob = $this->jobDispatcher()->dispatch(LinkIiif::class, ['import_job' => $jobId]);
+            $this->connection->update('preservica_import', ['link_job_id' => $linkJob->getId()], ['id' => $import['id']]);
+            $this->messenger()->addSuccess(new Message('Switching the items of import job #%1$s to IIIF links in job #%2$s', $jobId, $linkJob->getId())); // @translate
+        }
     }
 
     /**

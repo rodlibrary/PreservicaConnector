@@ -10,8 +10,9 @@ For each selected asset the module:
 - creates one Omeka item,
 - maps the asset's Dublin Core and MODS metadata to Dublin Core Terms
   properties,
-- copies the asset's access files into Omeka as ordinary media, so pages keep
-  working without a live connection to Preservica,
+- either copies the asset's access files into Omeka as ordinary media, or
+  links the item to the asset's IIIF manifest on your discovery platform, so
+  that no files are copied (see "Linking to IIIF manifests"),
 - remembers which asset the item came from, so the same asset is not imported
   twice.
 
@@ -50,6 +51,10 @@ Go to **Modules → Preservica Connector → Configure**.
 | Tenant | Optional. Only needed if the account belongs to more than one tenant. |
 | Use preservation files when there is no access copy | On by default. When off, assets without an Access representation are imported as metadata only. |
 | Record the Preservica reference | On by default. Adds the asset's reference (UUID) to the item as a Dublin Core Identifier. |
+| Media for imported items | **Copy files** (the default) or **Link to IIIF manifests**; see below. |
+| Shared identifier type | For linking: the type of the Preservica external identifier that holds each asset's shared identifier. |
+| IIIF manifest URL pattern | For linking: where the discovery platform serves an item's manifest, with `{id}` for the shared identifier, e.g. `https://discovery.example.edu/iiif/{id}/manifest`. |
+| Discovery record URL pattern | Optional: the item's page in the discovery site, e.g. `https://discovery.example.edu/catalog/{id}`. |
 
 When you save, the module logs in to Preservica once and tells you whether
 the connection works.
@@ -98,6 +103,41 @@ Preservica since. Large folders are fine: the job reads the folder from
 Preservica 100 entries at a time.
 
 You can also tick individual assets in a folder and import just those.
+
+### Linking to IIIF manifests
+
+When your discovery platform serves IIIF manifests, set **Media for imported
+items** to **Link to IIIF manifests**. Each imported item then gets the
+asset's manifest from the platform as its media, and no files are copied
+into Omeka; Omeka keeps only the manifest data and a thumbnail. There is one
+copy of each file, and a rights change on the platform applies to exhibits
+too.
+
+The module finds the manifest through the asset's shared identifier: the
+Preservica external identifier of the configured type (the type is matched
+without regard to capitals or spacing). It puts that identifier into the
+`{id}` of the URL pattern, encoded for use in a web address. The item also
+gets the shared identifier as a Dublin Core Identifier and, if a record URL
+pattern is set, a Relation linking to "Discovery record".
+
+An asset without a shared identifier, or whose manifest the platform does not
+serve, is not imported; the job log says why. Nothing is copied as a
+fallback.
+
+**Switching earlier imports.** Items imported while copying files can be
+switched to links later: on **Past imports**, tick the imports and click
+**Switch to IIIF links** (shown only when linking is on). Each item keeps its
+Omeka id, metadata and item sets, gets the manifest added, and loses the
+copied files. Exhibit pages that feature an item keep working, but a page
+block that shows one specific copied file needs that file replaced by the
+new IIIF media. If an item's manifest cannot be added, its files are kept.
+Switching again is safe; items that are already linked are left alone.
+
+The media use the module's own **IIIF presentation (Preservica Connector)**
+ingester and display with Omeka's IIIF presentation viewer. It accepts IIIF
+Presentation 3 manifests whose `@context` is a list, which Presentation 3
+requires when a manifest uses extensions and which Omeka S core (4.1 and 4.2)
+rejects.
 
 ### Past imports and undo
 

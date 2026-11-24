@@ -82,10 +82,66 @@ class ConfigForm extends Form
             ],
         ]);
 
+        $this->add([
+            'name' => 'preservicaconnector_media_mode',
+            'type' => Element\Radio::class,
+            'options' => [
+                'label' => 'Media for imported items', // @translate
+                'info' => 'Linking keeps one copy of each file on the discovery platform: items get the asset\'s IIIF manifest from the platform, found by its shared identifier, and no files are copied into Omeka. Assets without a shared identifier are then not imported.', // @translate
+                'value_options' => [
+                    'copy' => 'Copy files from Preservica into Omeka', // @translate
+                    'iiif' => 'Link to IIIF manifests on the discovery platform', // @translate
+                ],
+            ],
+            'attributes' => [
+                'id' => 'preservicaconnector_media_mode',
+                'value' => 'copy',
+            ],
+        ]);
+        $this->add([
+            'name' => 'preservicaconnector_shared_id_type',
+            'type' => Element\Text::class,
+            'options' => [
+                'label' => 'Shared identifier type', // @translate
+                'info' => 'The type of the Preservica external identifier that holds the shared identifier, for example the one used for ArchivesSpace component IDs. Needed for linking.', // @translate
+            ],
+            'attributes' => [
+                'id' => 'preservicaconnector_shared_id_type',
+            ],
+        ]);
+        $this->add([
+            'name' => 'preservicaconnector_manifest_url',
+            'type' => Element\Text::class,
+            'options' => [
+                'label' => 'IIIF manifest URL pattern', // @translate
+                'info' => 'The address of an item\'s IIIF manifest on the discovery platform, with {id} where the shared identifier goes. Needed for linking.', // @translate
+            ],
+            'attributes' => [
+                'id' => 'preservicaconnector_manifest_url',
+                'placeholder' => 'https://discovery.example.edu/iiif/{id}/manifest',
+            ],
+        ]);
+        $this->add([
+            'name' => 'preservicaconnector_record_url',
+            'type' => Element\Text::class,
+            'options' => [
+                'label' => 'Discovery record URL pattern', // @translate
+                'info' => 'Optional. The address of an item\'s record in the discovery site, with {id} where the shared identifier goes. Linked items get it as a Relation.', // @translate
+            ],
+            'attributes' => [
+                'id' => 'preservicaconnector_record_url',
+                'placeholder' => 'https://discovery.example.edu/catalog/{id}',
+            ],
+        ]);
+
         $inputFilter = $this->getInputFilter();
         $inputFilter->add(['name' => 'preservicaconnector_password', 'required' => false]);
         $inputFilter->add(['name' => 'preservicaconnector_tenant', 'required' => false]);
         $inputFilter->add(['name' => 'preservicaconnector_fallback_preservation', 'required' => false]);
         $inputFilter->add(['name' => 'preservicaconnector_store_reference', 'required' => false]);
+        $inputFilter->add(['name' => 'preservicaconnector_media_mode', 'required' => false]);
+        $inputFilter->add(['name' => 'preservicaconnector_shared_id_type', 'required' => false]);
+        $inputFilter->add(['name' => 'preservicaconnector_manifest_url', 'required' => false]);
+        $inputFilter->add(['name' => 'preservicaconnector_record_url', 'required' => false]);
     }
 }

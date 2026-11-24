@@ -3,6 +3,7 @@
  * @var \Laminas\View\Renderer\PhpRenderer $this
  * @var array $imports
  * @var \Laminas\Form\Form $form
+ * @var bool $iiifEnabled
  */
 $translate = $this->plugin('translate');
 $escape = $this->plugin('escapeHtml');
@@ -27,7 +28,10 @@ $this->htmlElement('body')->appendAttribute('class', 'preservica-connector brows
     <?php echo $this->formElement($element); ?>
     <?php endif; ?>
     <?php endforeach; ?>
-    <button type="submit"><?php echo $translate('Undo selected imports'); ?></button>
+    <?php if ($iiifEnabled): ?>
+    <button type="submit" name="action" value="link" id="preservica-link-button" title="<?php echo $escape($translate('Adds each item\'s IIIF manifest from the discovery platform and deletes the files copied from Preservica. Items keep their ids, so exhibit pages that feature them keep working; page blocks that show one specific copied file must be updated.')); ?>"><?php echo $translate('Switch to IIIF links'); ?></button>
+    <?php endif; ?>
+    <button type="submit" name="action" value="undo"><?php echo $translate('Undo selected imports'); ?></button>
     <?php echo $this->form()->closeTag(); ?>
 </div>
 
@@ -58,7 +62,13 @@ $this->htmlElement('body')->appendAttribute('class', 'preservica-connector brows
         if ($import['skipped_count']) {
             $results[] = sprintf($translate('%s already imported'), (int) $import['skipped_count']);
         }
-        if ($import['failed_count']) {
+        if ($import['linked_count']) {
+            $results[1] = sprintf($translate('%s linked to IIIF'), (int) $import['linked_count']);
+            if ($import['file_count']) {
+                $results[] = sprintf($translate('%s files'), (int) $import['file_count']);
+            }
+        }
+                if ($import['failed_count']) {
             $results[] = sprintf($translate('%s failed'), (int) $import['failed_count']);
         }
         ?>
@@ -100,6 +110,9 @@ $this->htmlElement('body')->appendAttribute('class', 'preservica-connector brows
                 <?php echo sprintf($translate('Undone in %s'), $undoJob->link(sprintf($translate('job #%s'), $undoJob->id()))); ?>
                 <?php else: ?>
                 <?php echo $escape($translate($job->statusLabel())); ?>
+                <?php endif; ?>
+                <?php if ($import['link_job'] && !$undoJob): ?>
+                <br><span class="preservica-muted"><?php echo sprintf($translate('Switched to IIIF links in %s'), $import['link_job']->link(sprintf($translate('job #%s'), $import['link_job']->id()))); ?></span>
                 <?php endif; ?>
             </td>
             <td><?php echo $owner ? $escape($owner->name()) : ''; ?></td>

@@ -25,6 +25,7 @@ return [
     'media_ingesters' => [
         'factories' => [
             'preservica' => Service\Media\Ingester\PreservicaFactory::class,
+            'preservica_iiif' => Service\Media\Ingester\IiifManifestFactory::class,
         ],
     ],
     'form_elements' => [

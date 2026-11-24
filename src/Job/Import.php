@@ -2,6 +2,7 @@
 namespace PreservicaConnector\Job;
 
 use Omeka\Job\AbstractJob;
+use PreservicaConnector\Media\IiifLinker;
 use PreservicaConnector\Preservica\Client;
 
 /**
@@ -83,7 +84,12 @@ class Import extends AbstractJob
             return $itemSetId;
         };
 
-        $counts = ['added_count' => 0, 'skipped_count' => 0, 'failed_count' => 0, 'file_count' => 0];
+        $this->linker = IiifLinker::fromSettings($client, $settings);
+        if ($this->linker->isEnabled()) {
+            $logger->info('Items will link to IIIF manifests on the discovery platform; no files are copied.'); // @translate
+        }
+
+        $counts = ['added_count' => 0, 'skipped_count' => 0, 'failed_count' => 0, 'file_count' => 0, 'linked_count' => 0];
         try {
             $this->importAll($refs, $getItemSetId, $client, $fallback, $storeReference, $jobId, $counts);
         } catch (\Exception $e) {
@@ -97,6 +103,9 @@ class Import extends AbstractJob
 
     /** @var \Omeka\Api\Manager */
     protected $api;
+
+    /** @var IiifLinker */
+    protected $linker;
 
     /** @var \Doctrine\DBAL\Connection */
     protected $connection;
@@ -134,7 +143,16 @@ class Import extends AbstractJob
                 }
 
                 $asset = $client->getAsset($ref);
-                $files = $client->getFiles($ref, $fallback);
+                $links = null;
+                if ($this->linker->isEnabled()) {
+                    // Fails the asset if it has no shared identifier, so
+                    // nothing is ever copied in this mode.
+                    $links = $this->linker->linksFor($ref);
+                    $files = [];
+                    self::addLinkValues($asset['dc'], $links);
+                } else {
+                    $files = $client->getFiles($ref, $fallback);
+                }
 
                 $itemData = $this->buildValues($asset, $storeReference);
                 $itemSetId = $getItemSetId();
@@ -150,7 +168,12 @@ class Import extends AbstractJob
                         'o:source' => $file['filename'],
                     ];
                 }
-                if (!$files) {
+                if ($links) {
+                    $itemData['o:media'][] = [
+                        'o:ingester' => 'preservica_iiif',
+                        'o:source' => $links['manifest'],
+                    ];
+                } elseif (!$files) {
                     $logger->warn(sprintf('%s has no file to import; importing its metadata only.', $ref));
                 }
 
@@ -159,10 +182,16 @@ class Import extends AbstractJob
                     'item_id' => $item->id(),
                     'job_id' => $jobId,
                     'preservica_ref' => $ref,
+                    'shared_id' => $links ? $links['id'] : null,
                 ]);
                 $counts['added_count']++;
-                $counts['file_count'] += count($files);
-                $logger->info(sprintf('Imported %s as item #%s with %s file(s).', $ref, $item->id(), count($files)));
+                if ($links) {
+                    $counts['linked_count']++;
+                    $logger->info(sprintf('Imported %s as item #%s, linked to %s.', $ref, $item->id(), $links['manifest']));
+                } else {
+                    $counts['file_count'] += count($files);
+                    $logger->info(sprintf('Imported %s as item #%s with %s file(s).', $ref, $item->id(), count($files)));
+                }
             } catch (\Omeka\Api\Exception\ValidationException $e) {
                 $counts['failed_count']++;
                 $logger->err(sprintf('Could not import %s: %s', $ref, json_encode($e->getErrorStore()->getErrors())));
@@ -231,6 +260,28 @@ class Import extends AbstractJob
             ['isPartial' => true, 'collectionAction' => 'append']
         );
         return true;
+    }
+
+    /**
+     * Add the shared identifier and the discovery record link to an asset's
+     * metadata, unless they are already there.
+     *
+     * @param array $dc Dublin Core Terms local name => values
+     * @param array $links From IiifLinker::linksFor()
+     */
+    public static function addLinkValues(array &$dc, array $links)
+    {
+        $labels = function ($name) use ($dc) {
+            return array_map(function ($value) {
+                return is_array($value) ? $value['uri'] : $value;
+            }, isset($dc[$name]) ? $dc[$name] : []);
+        };
+        if (!in_array($links['id'], $labels('identifier'), true)) {
+            $dc['identifier'][] = $links['id'];
+        }
+        if ($links['record'] && !in_array($links['record'], $labels('relation'), true)) {
+            $dc['relation'][] = ['uri' => $links['record'], 'label' => 'Discovery record'];
+        }
     }
 
     /**

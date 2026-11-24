@@ -417,6 +417,35 @@ class Client
     }
 
     /**
+     * List an asset's external identifiers.
+     *
+     * @return array [['type' => string, 'value' => string], ...]
+     */
+    public function getIdentifiers($ref)
+    {
+        $this->assertRef($ref);
+        $xpath = $this->requestXml('/api/entity/information-objects/' . $ref . '/identifiers');
+        $identifiers = [];
+        foreach ($xpath->query('//*[local-name()="Identifiers"]/*[local-name()="Identifier"]') as $node) {
+            $type = $value = '';
+            foreach ($node->childNodes as $child) {
+                if ($child->nodeType !== XML_ELEMENT_NODE) {
+                    continue;
+                }
+                if ($child->localName === 'Type') {
+                    $type = trim($child->textContent);
+                } elseif ($child->localName === 'Value') {
+                    $value = trim($child->textContent);
+                }
+            }
+            if ($type !== '' || $value !== '') {
+                $identifiers[] = ['type' => $type, 'value' => $value];
+            }
+        }
+        return $identifiers;
+    }
+
+    /**
      * List the downloadable files of an asset: one per content object, taken
      * from its active generation, from the Access representation when there
      * is one.

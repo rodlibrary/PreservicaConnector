@@ -89,6 +89,31 @@ if ($path === '/api/accesstoken/login' && $method === 'POST') {
     $save();
     return $json(['success' => true, 'token' => $token, 'refresh-token' => 'r', 'validFor' => 15, 'user' => $_POST['username']]);
 }
+// Stand-in for the discovery platform's IIIF manifests (no Preservica token).
+// GET /iiif/{shared id, URL-encoded}/manifest
+if (preg_match('#^/iiif/([^/]+)/manifest$#', $path, $m)) {
+    $id = rawurldecode($m[1]);
+    $known = ['aspace_0001' => 'Campus aerial photograph, 1954', 'MS 001/item 2' => 'Commencement program', 'array-context' => 'IIIF 3 manifest with an array @context'];
+    if (!isset($known[$id])) {
+        http_response_code(404);
+        return;
+    }
+    $self = 'http://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+    $context = $id === 'array-context'
+        ? ['http://www.w3.org/ns/anno.jsonld', 'http://iiif.io/api/presentation/3/context.json']
+        : 'http://iiif.io/api/presentation/3/context.json';
+    return $json([
+        '@context' => $context,
+        'id' => $self,
+        'type' => 'Manifest',
+        'label' => ['en' => [$known[$id]]],
+        'thumbnail' => [['id' => 'http://' . $_SERVER['HTTP_HOST'] . '/iiif-thumb/' . rawurlencode($id) . '.png', 'type' => 'Image', 'format' => 'image/png']],
+        'items' => [],
+    ]);
+}
+if (preg_match('#^/iiif-thumb/([^/]+)\.png$#', $path, $m)) {
+    return $image(substr(rawurldecode($m[1]), 0, 12), 'png', 200, 200);
+}
 if ($path === '/__state') {
     return $json(['logins' => $state['logins']]);
 }
@@ -157,6 +182,20 @@ if (preg_match('#^/api/entity/structural-objects/([0-9a-f-]{36})/children$#', $p
 if (preg_match('#^/api/entity/structural-objects/([0-9a-f-]{36})$#', $path, $m) && isset($folders[$m[1]])) {
     $f = $folders[$m[1]];
     return $xml('<EntityResponse xmlns="' . NS_ENTITY . '" xmlns:xip="' . NS_XIP . '"><xip:StructuralObject><xip:Ref>' . $m[1] . '</xip:Ref><xip:Title>' . htmlspecialchars($f['title']) . '</xip:Title><xip:Description>' . htmlspecialchars($f['description']) . '</xip:Description><xip:SecurityTag>open</xip:SecurityTag>' . ($f['parent'] ? '<xip:Parent>' . $f['parent'] . '</xip:Parent>' : '') . '</xip:StructuralObject><AdditionalInformation><Self>' . BASE . $path . '</Self></AdditionalInformation></EntityResponse>');
+}
+
+// External identifiers, as GET /api/entity/information-objects/{ref}/identifiers
+$identifiers = [
+    'a1111111-1111-4111-8111-111111111111' => [['Legacy accession', '1954.003'], ['ArchivesSpace component ID', 'aspace_0001']],
+    'a2222222-2222-4222-8222-222222222222' => [['archivesspace  component id', 'MS 001/item 2']],
+    'a3333333-3333-4333-8333-333333333333' => [['Legacy accession', 'OH-17']],
+];
+if (preg_match('#^/api/entity/information-objects/([0-9a-f-]{36})/identifiers$#', $path, $m) && isset($assets[$m[1]])) {
+    $out = '';
+    foreach ($identifiers[$m[1]] ?? [] as $i => [$type, $value]) {
+        $out .= '<xip:Identifier><xip:ApiId>id' . $i . '</xip:ApiId><xip:Type>' . htmlspecialchars($type) . '</xip:Type><xip:Value>' . htmlspecialchars($value) . '</xip:Value><xip:Entity>' . $m[1] . '</xip:Entity></xip:Identifier>';
+    }
+    return $xml('<IdentifiersResponse xmlns="' . NS_ENTITY . '" xmlns:xip="' . NS_XIP . '"><Identifiers>' . $out . '</Identifiers><Paging><TotalResults>' . count($identifiers[$m[1]] ?? []) . '</TotalResults></Paging></IdentifiersResponse>');
 }
 
 $uuid = '([0-9a-f-]{36})';

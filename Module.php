@@ -9,6 +9,7 @@ use Laminas\ServiceManager\ServiceLocatorInterface;
 use Laminas\View\Renderer\PhpRenderer;
 use Omeka\Module\AbstractModule;
 use PreservicaConnector\Form\ConfigForm;
+use PreservicaConnector\Media\IiifLinker;
 use PreservicaConnector\Preservica\Client;
 
 class Module extends AbstractModule
@@ -36,6 +37,7 @@ class Module extends AbstractModule
         $connection->executeStatement('ALTER TABLE preservica_item ADD CONSTRAINT FK_PRESERVICA_ITEM_ITEM FOREIGN KEY (item_id) REFERENCES item (id) ON DELETE CASCADE');
         $connection->executeStatement('ALTER TABLE preservica_item ADD CONSTRAINT FK_PRESERVICA_ITEM_JOB FOREIGN KEY (job_id) REFERENCES job (id) ON DELETE CASCADE');
         $this->installFolderSupport($connection);
+        $this->installIiifSupport($connection);
     }
 
     public function upgrade($oldVersion, $newVersion, ServiceLocatorInterface $serviceLocator)
@@ -44,6 +46,19 @@ class Module extends AbstractModule
         if (version_compare($oldVersion, '0.3.0', '<')) {
             $this->installFolderSupport($connection);
         }
+        if (version_compare($oldVersion, '0.4.0', '<')) {
+            $this->installIiifSupport($connection);
+        }
+    }
+
+    /**
+     * Schema added in 0.4.0 for linking items to IIIF manifests.
+     */
+    protected function installIiifSupport($connection)
+    {
+        $connection->executeStatement('ALTER TABLE preservica_item ADD shared_id VARCHAR(255) DEFAULT NULL, ADD INDEX IDX_PRESERVICA_ITEM_SHARED_ID (shared_id)');
+        $connection->executeStatement('ALTER TABLE preservica_import ADD linked_count INT DEFAULT 0 NOT NULL, ADD link_job_id INT DEFAULT NULL');
+        $connection->executeStatement('ALTER TABLE preservica_import ADD CONSTRAINT FK_PRESERVICA_IMPORT_LINK FOREIGN KEY (link_job_id) REFERENCES job (id) ON DELETE SET NULL');
     }
 
     /**
@@ -67,7 +82,7 @@ class Module extends AbstractModule
         $connection->executeStatement('DROP TABLE IF EXISTS preservica_import');
 
         $settings = $serviceLocator->get('Omeka\Settings');
-        foreach (['host', 'username', 'password', 'tenant', 'fallback_preservation', 'store_reference'] as $name) {
+        foreach (['host', 'username', 'password', 'tenant', 'fallback_preservation', 'store_reference', 'media_mode', 'shared_id_type', 'manifest_url', 'record_url'] as $name) {
             $settings->delete('preservicaconnector_' . $name);
         }
     }
@@ -85,6 +100,10 @@ class Module extends AbstractModule
             'preservicaconnector_tenant' => $settings->get('preservicaconnector_tenant'),
             'preservicaconnector_fallback_preservation' => $settings->get('preservicaconnector_fallback_preservation', true),
             'preservicaconnector_store_reference' => $settings->get('preservicaconnector_store_reference', true),
+            'preservicaconnector_media_mode' => $settings->get('preservicaconnector_media_mode', IiifLinker::MODE_COPY),
+            'preservicaconnector_shared_id_type' => $settings->get('preservicaconnector_shared_id_type'),
+            'preservicaconnector_manifest_url' => $settings->get('preservicaconnector_manifest_url'),
+            'preservicaconnector_record_url' => $settings->get('preservicaconnector_record_url'),
         ]);
         // The stored password is never sent back to the browser.
         if ($settings->get('preservicaconnector_password')) {
@@ -115,6 +134,31 @@ class Module extends AbstractModule
             $controller->messenger()->addError('The Preservica host is not a valid host name or URL.'); // @translate
             return false;
         }
+        $mode = $data['preservicaconnector_media_mode'] === IiifLinker::MODE_IIIF ? IiifLinker::MODE_IIIF : IiifLinker::MODE_COPY;
+        $idType = trim((string) $data['preservicaconnector_shared_id_type']);
+        $manifestUrl = trim((string) $data['preservicaconnector_manifest_url']);
+        $recordUrl = trim((string) $data['preservicaconnector_record_url']);
+        $errors = [];
+        if ($manifestUrl !== '' && !IiifLinker::isValidPattern($manifestUrl)) {
+            $errors[] = 'The IIIF manifest URL pattern must be a web address containing {id}.'; // @translate
+        }
+        if ($recordUrl !== '' && !IiifLinker::isValidPattern($recordUrl)) {
+            $errors[] = 'The discovery record URL pattern must be a web address containing {id}.'; // @translate
+        }
+        if ($mode === IiifLinker::MODE_IIIF && ($idType === '' || $manifestUrl === '')) {
+            $errors[] = 'To link to IIIF manifests, set the shared identifier type and the IIIF manifest URL pattern.'; // @translate
+        }
+        if ($errors) {
+            foreach ($errors as $error) {
+                $controller->messenger()->addError($error);
+            }
+            return false;
+        }
+
+        $settings->set('preservicaconnector_media_mode', $mode);
+        $settings->set('preservicaconnector_shared_id_type', $idType);
+        $settings->set('preservicaconnector_manifest_url', $manifestUrl);
+        $settings->set('preservicaconnector_record_url', $recordUrl);
         $settings->set('preservicaconnector_host', $host);
         $settings->set('preservicaconnector_username', trim($data['preservicaconnector_username']));
         $settings->set('preservicaconnector_tenant', trim((string) $data['preservicaconnector_tenant']));

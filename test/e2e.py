@@ -315,6 +315,94 @@ undo(yearbooks_job)
 check('undo removes the folder items', len(api('items', per_page=500)) == 1)
 check('undo removes the now-empty item set it created', 'Yearbooks' not in item_sets(), list(item_sets()))
 
+# --- IIIF linking instead of copying
+MANIFEST = 'http://127.0.0.1:9090/iiif/{id}/manifest'
+RECORD = 'https://discovery.example.edu/catalog/{id}'
+
+
+def configure_media(mode, id_type='ArchivesSpace component ID', manifest=MANIFEST, record=RECORD):
+    r = s.get(B + '/admin/module/configure?id=PreservicaConnector')
+    form, data = form_data(soup(r), '#content form')
+    data.update({
+        'preservicaconnector_host': 'http://127.0.0.1:9090/',
+        'preservicaconnector_username': 'svc-omeka@uni.example',
+        'preservicaconnector_password': '',
+        'preservicaconnector_fallback_preservation': '1',
+        'preservicaconnector_store_reference': '1',
+        'preservicaconnector_media_mode': mode,
+        'preservicaconnector_shared_id_type': id_type,
+        'preservicaconnector_manifest_url': manifest,
+        'preservicaconnector_record_url': record,
+    })
+    return messages(soup(s.post(B + '/admin/module/configure?id=PreservicaConnector', data=data)))
+
+
+msgs = configure_media('iiif', manifest='http://127.0.0.1:9090/iiif/manifest')
+check('manifest pattern without {id} rejected', any('must be a web address containing {id}' in m for m in msgs), msgs)
+msgs = configure_media('iiif', id_type='')
+check('linking without an identifier type rejected', any('set the shared identifier type' in m for m in msgs), msgs)
+msgs = configure_media('iiif')
+check('linking settings saved', any('Connected to Preservica' in m for m in msgs), msgs)
+page = soup(s.get(B + '/admin/module/configure?id=PreservicaConnector'))
+check('linking settings shown again', page.select_one('#content input[value="iiif"][checked]') is not None and page.select_one('#preservicaconnector_manifest_url')['value'] == MANIFEST)
+
+page = soup(s.get(B + '/admin/preservica-connector', params={'q': '%'}))
+form, data = form_data(page, '#preservica-import-form')
+data['refs[]'] = ['a2222222-2222-4222-8222-222222222222', 'a3333333-3333-4333-8333-333333333333']
+link_job = re.search(r'/admin/job/(\d+)', s.post(B + '/admin/preservica-connector/import', data=data).text).group(1)
+check('linking import completed', wait_job(link_job) == 'Completed')
+row = import_row(link_job)
+check('past imports shows linked count', '1 added, 1 linked to IIIF, 1 failed' in row, row)
+log = s.get(f'{B}/admin/job/{link_job}/log').text
+check('asset without a shared identifier explained in log', 'no "ArchivesSpace component ID" identifier' in log, log)
+
+program = [i for i in api('items', preservica_import_job=link_job)][0]
+media = [s.get(m['@id']).json() for m in program['o:media']]
+check('linked item has one IIIF presentation media', [(m['o:ingester'], m['o:renderer']) for m in media] == [('preservica_iiif', 'iiif_presentation')], [m['o:ingester'] for m in media])
+check('manifest URL built from the shared identifier (case-insensitive type, encoded id)', media[0]['o:source'] == 'http://127.0.0.1:9090/iiif/MS%20001%2Fitem%202/manifest', media[0]['o:source'])
+check('no file copied into Omeka', media[0].get('o:original_url') is None and media[0]['o:thumbnail_urls'].get('square'), media[0])
+ids = [v['@value'] for v in program['dcterms:identifier']]
+check('shared identifier recorded', 'MS 001/item 2' in ids, ids)
+rel = program['dcterms:relation'][0]
+check('discovery record linked', rel['type'] == 'uri' and rel['@id'] == 'https://discovery.example.edu/catalog/MS%20001%2Fitem%202' and rel['o:label'] == 'Discovery record', rel)
+
+# Switch the earlier copied import (the aerial photograph, 2 copied files) to links.
+aerial = api('items', preservica_import_job=single_job)[0]
+old_media = [m['@id'] for m in aerial['o:media']]
+check('before switching: 2 copied files', len(old_media) == 2)
+page = soup(s.get(B + '/admin/preservica-connector/past-imports'))
+check('switch button shown when linking is on', page.select_one('#preservica-link-button') is not None)
+form, data = form_data(page, '#preservica-undo-form')
+data.update({'undo[]': [single_job], 'action': 'link'})
+r = s.post(B + '/admin/preservica-connector/past-imports', data=data)
+m = re.search(r'IIIF links in job #(\d+)', ' '.join(messages(soup(r))))
+check('switch job dispatched', m is not None, messages(soup(r)))
+check('switch job completed', wait_job(m.group(1)) == 'Completed')
+after = s.get(aerial['@id']).json()
+media = [s.get(x['@id']).json() for x in after['o:media']]
+check('same item kept', after['o:id'] == aerial['o:id'])
+check('copied files replaced by one IIIF link', [(x['o:ingester'], x['o:source']) for x in media] == [('preservica_iiif', 'http://127.0.0.1:9090/iiif/aspace_0001/manifest')], [(x['o:ingester'], x['o:source']) for x in media])
+check('copied media deleted', all(s.get(u).status_code == 404 for u in old_media))
+check('shared identifier and record link added', 'aspace_0001' in [v.get('@value') for v in after['dcterms:identifier']] and after['dcterms:relation'][0]['@id'].endswith('/aspace_0001'))
+check('existing values kept', after['dcterms:creator'][0]['@value'] == 'University Photo Service' and len(after['dcterms:subject']) == 2)
+check('still in its item set', [x['o:id'] for x in after['o:item_set']] == [archives['o:id']])
+check('past imports notes the switch', 'Switched to IIIF links in job' in import_row(single_job))
+
+data.update({'undo[]': [single_job], 'action': 'link'})
+form, data2 = form_data(soup(s.get(B + '/admin/preservica-connector/past-imports')), '#preservica-undo-form')
+data2.update({'undo[]': [single_job], 'action': 'link'})
+r = s.post(B + '/admin/preservica-connector/past-imports', data=data2)
+again = re.search(r'IIIF links in job #(\d+)', ' '.join(messages(soup(r)))).group(1)
+check('switching again completes', wait_job(again) == 'Completed')
+check('switching again changes nothing', 'already links to' in s.get(f'{B}/admin/job/{again}/log').text and len(s.get(aerial['@id']).json()['o:media']) == 1)
+
+undo(link_job)
+check('undo removes linked items', len(api('items', preservica_import_job=link_job)) == 0)
+
+msgs = configure_media('copy')
+page = soup(s.get(B + '/admin/preservica-connector/past-imports'))
+check('switch button hidden when copying', page.select_one('#preservica-link-button') is None)
+
 logins = requests.get('http://127.0.0.1:9090/__state', proxies={'http': None}).json()['logins']
 print('mock Preservica logins during run:', logins)
 print('ALL PASSED')
